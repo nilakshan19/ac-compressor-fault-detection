@@ -8,9 +8,75 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import plotly.graph_objects as go
+import hashlib
 
 # Page config MUST be first
 st.set_page_config(page_title="Fault Detection", page_icon="🔧", layout="wide")
+
+# ========== USERNAME + PASSWORD AUTHENTICATION ==========
+def check_credentials():
+    """Returns `True` if the user has correct username and password."""
+    
+    # Define user (username: password_hash)
+    USERS = {
+        "admin": hashlib.sha256("Admin123!".encode()).hexdigest(),
+    }
+    
+    def credentials_entered():
+        """Checks credentials."""
+        username = st.session_state.get("username", "")
+        password = st.session_state.get("password", "")
+        
+        if username in USERS and hashlib.sha256(password.encode()).hexdigest() == USERS[username]:
+            st.session_state["authenticated"] = True
+            st.session_state["current_user"] = username
+            del st.session_state["username"]
+            del st.session_state["password"]
+        else:
+            st.session_state["authenticated"] = False
+
+    if "authenticated" not in st.session_state:
+        st.markdown("### 🔐 AC Compressor Dashboard - Login")
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.text_input("👤 Username", key="username", placeholder="Enter username")
+            st.text_input("🔐 Password", type="password", key="password", placeholder="Enter password")
+            st.button("🚀 Login", on_click=credentials_entered, use_container_width=True)
+            
+            with st.expander("ℹ️ Login Information"):
+                st.info("Username: `admin` | Password: `Admin123!`")
+        return False
+        
+    elif not st.session_state["authenticated"]:
+        st.markdown("### 🔐 AC Compressor Dashboard - Login")
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.error("❌ Invalid username or password. Please try again.")
+            st.text_input("👤 Username", key="username", placeholder="Enter username")
+            st.text_input("🔐 Password", type="password", key="password", placeholder="Enter password")
+            st.button("🚀 Login", on_click=credentials_entered, use_container_width=True)
+            
+            with st.expander("ℹ️ Login Information"):
+                st.info("Username: `admin` | Password: `Admin123!`")
+        return False
+        
+    else:
+        return True
+
+if not check_credentials():
+    st.stop()
+
+# Logout button
+col1, col2 = st.columns([6, 1])
+with col2:
+    if st.button("🚪 Logout"):
+        st.session_state["authenticated"] = False
+        st.rerun()
+# ========== END AUTHENTICATION ==========
 
 # Load models only once
 @st.cache_resource
@@ -87,11 +153,11 @@ def on_message(client, userdata, msg):
             sensor_data.data["last_update"] = current_time
             sensor_data.data["count"] += 1
 
-            # ✅ Prevent duplicate entries
+            # Prevent duplicate entries
             if len(sensor_data.history) > 0:
                 last = sensor_data.history[-1]
                 if last["Timestamp"] == current_time:
-                    return  # Skip if already stored
+                    return
 
             # Add new reading to history
             sensor_data.history.append({
