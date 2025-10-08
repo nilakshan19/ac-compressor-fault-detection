@@ -5,7 +5,8 @@ import paho.mqtt.client as mqtt
 import time
 import threading
 import pandas as pd
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+import pytz
 import plotly.graph_objects as go
 
 # Page config MUST be first
@@ -70,8 +71,8 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
         
-        # Sri Lanka timezone (UTC+5:30)
-        sri_lanka_tz = timezone(timedelta(hours=5, minutes=30))
+        # Sri Lanka timezone using pytz (works on cloud servers)
+        sri_lanka_tz = pytz.timezone('Asia/Colombo')
         current_time = datetime.now(sri_lanka_tz).strftime("%Y-%m-%d %H:%M:%S")
         
         with sensor_data.lock:
@@ -181,7 +182,7 @@ with c4:
         with sensor_data.lock:
             df = pd.DataFrame(sensor_data.history.copy())
         csv = df.to_csv(index=False).encode('utf-8')
-        sri_lanka_tz = timezone(timedelta(hours=5, minutes=30))
+        sri_lanka_tz = pytz.timezone('Asia/Colombo')
         st.download_button("📥 CSV", csv, f"data_{datetime.now(sri_lanka_tz).strftime('%Y%m%d_%H%M%S')}.csv")
 
 st.markdown("---")
