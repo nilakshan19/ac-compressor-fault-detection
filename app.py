@@ -5,7 +5,7 @@ import paho.mqtt.client as mqtt
 import time
 import threading
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import plotly.graph_objects as go
 
 # Page config MUST be first
@@ -70,6 +70,10 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
         
+        # Sri Lanka timezone (UTC+5:30)
+        sri_lanka_tz = timezone(timedelta(hours=5, minutes=30))
+        current_time = datetime.now(sri_lanka_tz).strftime("%Y-%m-%d %H:%M:%S")
+        
         with sensor_data.lock:
             sensor_data.data["noise_db"] = float(payload.get("noise_db", 0))
             sensor_data.data["water_outlet_temp"] = float(payload.get("water_outlet_temp", 0))
@@ -79,18 +83,18 @@ def on_message(client, userdata, msg):
             sensor_data.data["voltage"] = float(payload.get("voltage", 0))
             sensor_data.data["current"] = float(payload.get("current", 0))
             sensor_data.data["power"] = float(payload.get("power", 0))
-            sensor_data.data["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            sensor_data.data["last_update"] = current_time
             sensor_data.data["count"] += 1
 
             # ✅ Prevent duplicate entries
             if len(sensor_data.history) > 0:
                 last = sensor_data.history[-1]
-                if last["Timestamp"] == sensor_data.data["last_update"]:
+                if last["Timestamp"] == current_time:
                     return  # Skip if already stored
 
             # Add new reading to history
             sensor_data.history.append({
-                "Timestamp": sensor_data.data["last_update"],
+                "Timestamp": current_time,
                 "Noise_dB": sensor_data.data["noise_db"],
                 "Water_Outlet_Temp_C": sensor_data.data["water_outlet_temp"],
                 "Ambient_Temp_C": sensor_data.data["ambient_temp"],
@@ -177,7 +181,8 @@ with c4:
         with sensor_data.lock:
             df = pd.DataFrame(sensor_data.history.copy())
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 CSV", csv, f"data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        sri_lanka_tz = timezone(timedelta(hours=5, minutes=30))
+        st.download_button("📥 CSV", csv, f"data_{datetime.now(sri_lanka_tz).strftime('%Y%m%d_%H%M%S')}.csv")
 
 st.markdown("---")
 
@@ -241,7 +246,7 @@ with st.expander("📈 Graph View"):
     if history_len > 5:
         with sensor_data.lock:
             df_graph = pd.DataFrame(sensor_data.history.copy())
-        df_graph["Count"] = range(1, len(df_graph) + 1)  # ✅ Add Count column
+        df_graph["Count"] = range(1, len(df_graph) + 1)
         
         tab1, tab2, tab3, tab4 = st.tabs([
             "🌡️ Water Outlet Temperature", 
