@@ -9,6 +9,8 @@ from datetime import datetime
 import pytz
 import plotly.graph_objects as go
 import hashlib
+import numpy as np
+import traceback
 
 # ===================== BASIC CONFIG =====================
 st.set_page_config(page_title="Fault Detection", page_icon="🔧", layout="wide")
@@ -85,6 +87,17 @@ def load_models():
 
 bearings_model, radiator_model = load_models()
 
+# ---- Safe prediction wrapper ----
+def predict_safe(model, features):
+    try:
+        X = np.array([features], dtype=np.float32)  # shape (1, n_features)
+        y = model.predict(X)
+        # CatBoost may return array([0.]) or array([0])
+        return int(y[0])
+    except Exception:
+        print("Predict failed:\n", traceback.format_exc())
+        return None
+
 # ===================== MQTT SETUP =======================
 MQTT_BROKER = "broker.emqx.io"
 MQTT_PORT = 1883
@@ -124,24 +137,23 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
 
-        # Backward compatibility mappings
+        # Backward compatibility
         if "water_outlet_temp" in payload and "expansion_valve_outlet_temp" not in payload:
             payload["expansion_valve_outlet_temp"] = payload["water_outlet_temp"]
         if "condenser_inlet_temp" not in payload:
             payload["condenser_inlet_temp"] = 0.0
 
+        # --- Timestamp to seconds only ---
         now_dt = datetime.now(SL_TZ)
-        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")  # microseconds
-        ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")    # seconds
+        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S")   # for history rows
+        ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S") # for status header
 
-        # ---- validate payload; skip empty/heartbeat frames ----
+        # Skip empty/heartbeat frames that carry no sensor keys
         keys_of_interest = [
             "noise_db", "expansion_valve_outlet_temp", "condenser_inlet_temp",
             "ambient_temp", "humidity", "voltage", "current", "power"
         ]
-        has_any_value = any(k in payload for k in keys_of_interest)
-        if not has_any_value:
-            # do not append a blank row
+        if not any(k in payload for k in keys_of_interest):
             return
 
         with sensor_data.lock:
@@ -156,7 +168,7 @@ def on_message(client, userdata, msg):
             sensor_data.data["last_update"] = ts_status
             sensor_data.data["count"] += 1
 
-            # ------ append full row, including Count first ------
+            # Append row with Count first, then Timestamp
             sensor_data.history.append({
                 "Count": sensor_data.data["count"],
                 "Timestamp": ts_hist,
@@ -170,7 +182,6 @@ def on_message(client, userdata, msg):
                 "Power (mW)": sensor_data.data["power"]
             })
 
-            # Cap history
             if len(sensor_data.history) > MAX_ROWS:
                 sensor_data.history = sensor_data.history[-MAX_ROWS:]
 
@@ -202,7 +213,7 @@ def create_graph(df, column, title, y_label, color_hex):
         fig.add_trace(go.Scatter(
             x=df['Timestamp'],
             y=df[column],
-            mode='lines',                     # <<< LINE ONLY
+            mode='lines',                     # line only
             name=y_label,
             line=dict(color=color_hex, width=2)
         ))
@@ -269,17 +280,19 @@ with col3:
 
 st.markdown("---")
 
-# Predictions
+# ===================== PREDICTIONS ======================
 st.subheader("🔍 Component Status Predictions")
 noise_val = current.get('noise_db', 0.0)
 exp_valve_temp = current.get('expansion_valve_outlet_temp', 0.0)
 water_flow_placeholder = 0.0
 values = [noise_val, exp_valve_temp, water_flow_placeholder]
 
-try:
-    p_bearings = int(bearings_model.predict([values])[0])
-    p_radiator = int(radiator_model.predict([values])[0])
+p_bearings = predict_safe(bearings_model, values)
+p_radiator  = predict_safe(radiator_model, values)
 
+if p_bearings is None or p_radiator is None:
+    st.error("Prediction unavailable. Check model files and CatBoost version. See server logs for details.")
+else:
     pc1, pc2 = st.columns(2)
     with pc1:
         st.metric("🔩 Bearings", f"{'🟢 Normal' if p_bearings==0 else '🔴 Fault'}")
@@ -290,8 +303,6 @@ try:
     faults = p_bearings + p_radiator
     st.success("✅ All monitored components operating normally") if faults==0 \
         else st.warning(f"⚠️ {faults} component(s) showing abnormal behavior")
-except Exception as e:
-    st.error(f"Prediction Error: {e}")
 
 # ===================== GRAPHS ===========================
 with st.expander("📈 Graph View"):
@@ -299,7 +310,6 @@ with st.expander("📈 Graph View"):
         with sensor_data.lock:
             df_graph = pd.DataFrame(sensor_data.history.copy())
 
-        # Drop rows where all sensor columns are NaN/None (safety)
         sensor_cols = [
             "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
             "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
@@ -307,11 +317,9 @@ with st.expander("📈 Graph View"):
         if len(df_graph)>0:
             df_graph = df_graph.dropna(how="all", subset=sensor_cols)
 
-        # Sort by time and reset index
         if "Timestamp" in df_graph.columns:
             df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
 
-        # Ensure Count is monotonic (for display)
         if "Count" not in df_graph.columns:
             df_graph["Count"] = range(1, len(df_graph)+1)
 
@@ -361,14 +369,12 @@ with st.expander("📊 Historical Data"):
         with sensor_data.lock:
             df_history = pd.DataFrame(sensor_data.history.copy())
 
-        # Drop all-NaN sensor rows (prevents 'None' rows)
         sensor_cols = [
             "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
             "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
         ]
         df_history = df_history.dropna(how="all", subset=sensor_cols)
 
-        # Desired column order: Count, Timestamp, then sensors
         ordered_cols = ["Count", "Timestamp"] + sensor_cols
         available_cols = [c for c in ordered_cols if c in df_history.columns]
         df_display = df_history[available_cols].tail(100)
@@ -379,7 +385,7 @@ with st.expander("📊 Historical Data"):
             height=420,
             column_config={
                 "Count": st.column_config.NumberColumn("Count", format="%d"),
-                "Timestamp": st.column_config.TextColumn("Time (YYYY-MM-DD HH:MM:SS.ffffff)"),
+                "Timestamp": st.column_config.TextColumn("Time (YYYY-MM-DD HH:MM:SS)"),
                 "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
                 "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve Temp (°C)", format="%.2f"),
                 "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser Temp (°C)", format="%.2f"),
