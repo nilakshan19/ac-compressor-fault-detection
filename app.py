@@ -325,12 +325,9 @@ try:
         st.success("✅ All monitored components operating normally")
     else:
         st.warning(f"⚠️ {faults} component(s) showing abnormal behavior")
-    
-    st.info("ℹ️ Note: Predictions use a placeholder value for water flow (feature removed from sensor)")
         
 except Exception as e:
     st.error(f"Prediction Error: {e}")
-    st.info("💡 Tip: Models may need retraining without the water_flow feature")
 
 # Graph View
 with st.expander("📈 Graph View"):
@@ -383,19 +380,34 @@ with st.expander("📈 Graph View"):
     else:
         st.info(f"📊 Collecting data... ({history_len}/5 readings). Graphs will appear once 5 or more readings are available.")
 
-# Historical Data with proper column names
+# Historical Data - Only show specified columns
 with st.expander("📊 Historical Data"):
     if history_len > 0:
         with sensor_data.lock:
             df_history = pd.DataFrame(sensor_data.history.copy())
         
+        # Select only the required columns (exclude Timestamp)
+        columns_to_display = [
+            "Noise (dB)",
+            "Expansion Valve Outlet Temp (°C)",
+            "Condenser Inlet Temp (°C)",
+            "Ambient Temp (°C)",
+            "Humidity (%)",
+            "Voltage (V)",
+            "Current (mA)",
+            "Power (mW)"
+        ]
+        
+        # Filter to only show existing columns
+        available_columns = [col for col in columns_to_display if col in df_history.columns]
+        df_display = df_history[available_columns].tail(100)
+        
         # Display with nice formatting
         st.dataframe(
-            df_history.tail(100),
+            df_display,
             use_container_width=True,
             height=400,
             column_config={
-                "Timestamp": st.column_config.TextColumn("Timestamp", width="medium"),
                 "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
                 "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve Temp (°C)", format="%.2f"),
                 "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser Temp (°C)", format="%.2f"),
