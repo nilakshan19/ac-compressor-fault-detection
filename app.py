@@ -131,7 +131,7 @@ def on_message(client, userdata, msg):
             payload["condenser_inlet_temp"] = 0.0
 
         now_dt = datetime.now(SL_TZ)
-        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")  # microseconds
+    
         ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")    # seconds
 
         # ---- validate payload; skip empty/heartbeat frames ----
@@ -397,3 +397,4 @@ with st.expander("📊 Historical Data"):
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
 st.rerun()
+
