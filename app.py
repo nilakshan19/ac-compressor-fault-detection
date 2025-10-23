@@ -218,7 +218,7 @@ def create_graph(df, column, title, y_label, color):
 
 st.title("🔧 AC Compressor Fault Detection")
 
-# Get current data
+# Get current data safely
 with sensor_data.lock:
     current = sensor_data.data.copy()
     history_len = len(sensor_data.history)
@@ -253,32 +253,35 @@ with c4:
 
 st.markdown("---")
 
-# Sensor Readings
+# Sensor Readings with safe access
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.subheader("📊 Sensor Readings")
-    st.metric("Noise", f"{current['noise_db']:.2f} dB")
-    st.metric("Expansion Valve Outlet Temp", f"{current['expansion_valve_outlet_temp']:.2f} °C")
-    st.metric("Condenser Inlet Temp", f"{current['condenser_inlet_temp']:.2f} °C")
+    st.metric("Noise", f"{current.get('noise_db', 0.0):.2f} dB")
+    st.metric("Expansion Valve Outlet Temp", f"{current.get('expansion_valve_outlet_temp', 0.0):.2f} °C")
+    st.metric("Condenser Inlet Temp", f"{current.get('condenser_inlet_temp', 0.0):.2f} °C")
 
 with col2:
     st.subheader("🌡️ Environmental")
-    st.metric("Ambient Temp", f"{current['ambient_temp']:.2f} °C")
-    st.metric("Humidity", f"{current['humidity']:.2f} %")
+    st.metric("Ambient Temp", f"{current.get('ambient_temp', 0.0):.2f} °C")
+    st.metric("Humidity", f"{current.get('humidity', 0.0):.2f} %")
 
 with col3:
     st.subheader("⚡ Power Measurements")
-    st.metric("Voltage", f"{current['voltage']:.2f} V")
-    st.metric("Current", f"{current['current']:.2f} mA")
-    st.metric("Power", f"{current['power']:.2f} mW")
+    st.metric("Voltage", f"{current.get('voltage', 0.0):.2f} V")
+    st.metric("Current", f"{current.get('current', 0.0):.2f} mA")
+    st.metric("Power", f"{current.get('power', 0.0):.2f} mW")
 
 st.markdown("---")
 
 # Component Status Predictions
 st.subheader("🔍 Component Status Predictions")
 
-values = [current['noise_db'], current['expansion_valve_outlet_temp']]
+# Safely get values for prediction
+noise_val = current.get('noise_db', 0.0)
+exp_valve_temp = current.get('expansion_valve_outlet_temp', 0.0)
+values = [noise_val, exp_valve_temp]
 
 try:
     p1 = bearings_model.predict([values])[0]
@@ -306,7 +309,7 @@ try:
         st.warning(f"⚠️ {faults} component(s) showing abnormal behavior")
         
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Prediction Error: {e}")
 
 # Graph View
 with st.expander("📈 Graph View"):
