@@ -137,6 +137,16 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
         
+        # ============ BACKWARD COMPATIBILITY ============
+        # Handle old field names from ESP32
+        if "water_outlet_temp" in payload and "expansion_valve_outlet_temp" not in payload:
+            payload["expansion_valve_outlet_temp"] = payload["water_outlet_temp"]
+        
+        # If condenser_inlet_temp is missing, set default
+        if "condenser_inlet_temp" not in payload:
+            payload["condenser_inlet_temp"] = 0.0
+        # ================================================
+        
         # Sri Lanka timezone using pytz (works on cloud servers)
         sri_lanka_tz = pytz.timezone('Asia/Colombo')
         current_time = datetime.now(sri_lanka_tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -195,15 +205,26 @@ mqtt_client = start_mqtt()
 
 # Function to create graph
 def create_graph(df, column, title, y_label, color):
+    """Create a plotly graph with error handling"""
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df['Timestamp'],
-        y=df[column],
-        mode='lines+markers',
-        name=y_label,
-        line=dict(color=color, width=2),
-        marker=dict(size=6)
-    ))
+    
+    # Check if column exists in dataframe
+    if column not in df.columns:
+        fig.add_annotation(
+            text=f"Column '{column}' not found in data",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False
+        )
+    else:
+        fig.add_trace(go.Scatter(
+            x=df['Timestamp'],
+            y=df[column],
+            mode='lines+markers',
+            name=y_label,
+            line=dict(color=color, width=2),
+            marker=dict(size=6)
+        ))
+    
     fig.update_layout(
         title=title,
         xaxis_title="Time",
@@ -279,9 +300,14 @@ st.markdown("---")
 st.subheader("🔍 Component Status Predictions")
 
 # Safely get values for prediction
+# Models were trained with [noise_db, water_outlet_temp, water_flow]
+# Since we removed water_flow, we'll use 0.0 as a placeholder
 noise_val = current.get('noise_db', 0.0)
 exp_valve_temp = current.get('expansion_valve_outlet_temp', 0.0)
-values = [noise_val, exp_valve_temp]
+water_flow_placeholder = 0.0  # Placeholder for removed water_flow feature
+
+# Models expect 3 features in this order: [noise_db, water_outlet_temp, water_flow]
+values = [noise_val, exp_valve_temp, water_flow_placeholder]
 
 try:
     p1 = bearings_model.predict([values])[0]
@@ -307,15 +333,23 @@ try:
         st.success("✅ All components operating normally")
     else:
         st.warning(f"⚠️ {faults} component(s) showing abnormal behavior")
+    
+    st.info("ℹ️ Note: Predictions use a placeholder value for water flow (feature removed from sensor)")
         
 except Exception as e:
     st.error(f"Prediction Error: {e}")
+    st.info("💡 Tip: Models may need retraining without the water_flow feature")
 
 # Graph View
 with st.expander("📈 Graph View"):
     if history_len > 5:
         with sensor_data.lock:
             df_graph = pd.DataFrame(sensor_data.history.copy())
+        
+        # Check if required columns exist
+        available_columns = df_graph.columns.tolist()
+        st.caption(f"Available data columns: {', '.join(available_columns)}")
+        
         df_graph["Count"] = range(1, len(df_graph) + 1)
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -328,19 +362,31 @@ with st.expander("📈 Graph View"):
         
         with tab1:
             st.subheader("Expansion Valve Outlet Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Expansion_Valve_Outlet_Temp_C', 'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'), use_container_width=True)
+            if 'Expansion_Valve_Outlet_Temp_C' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Expansion_Valve_Outlet_Temp_C', 'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'), use_container_width=True)
+            else:
+                st.warning("⚠️ Expansion Valve Outlet Temperature data not available")
         
         with tab2:
             st.subheader("Condenser Inlet Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Condenser_Inlet_Temp_C', 'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'), use_container_width=True)
+            if 'Condenser_Inlet_Temp_C' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Condenser_Inlet_Temp_C', 'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'), use_container_width=True)
+            else:
+                st.warning("⚠️ Condenser Inlet Temperature data not available")
         
         with tab3:
             st.subheader("Ambient Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Ambient_Temp_C', 'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'), use_container_width=True)
+            if 'Ambient_Temp_C' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Ambient_Temp_C', 'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'), use_container_width=True)
+            else:
+                st.warning("⚠️ Ambient Temperature data not available")
         
         with tab4:
             st.subheader("Humidity Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Humidity_Percent', 'Humidity', 'Humidity (%)', '#95E1D3'), use_container_width=True)
+            if 'Humidity_Percent' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Humidity_Percent', 'Humidity', 'Humidity (%)', '#95E1D3'), use_container_width=True)
+            else:
+                st.warning("⚠️ Humidity data not available")
 
         with tab5:
             st.subheader("📈 Data Reception Count Over Time")
