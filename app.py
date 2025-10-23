@@ -78,24 +78,18 @@ with col2:
         st.rerun()
 # ========== END AUTHENTICATION ==========
 
-# Load models only once
+# Load models only once (only bearings and radiator)
 @st.cache_resource
 def load_models():
     bearings = CatBoostClassifier()
     bearings.load_model('bearings_trained_model.cbm')
     
-    wpump = CatBoostClassifier()
-    wpump.load_model('wpump_trained_model.cbm')
-    
     radiator = CatBoostClassifier()
     radiator.load_model('radiator_trained_model.cbm')
     
-    exvalve = CatBoostClassifier()
-    exvalve.load_model('exvalve_trained_model.cbm')
-    
-    return bearings, wpump, radiator, exvalve
+    return bearings, radiator
 
-bearings_model, wpump_model, radiator_model, exvalve_model = load_models()
+bearings_model, radiator_model = load_models()
 
 # MQTT Config
 MQTT_BROKER = "broker.emqx.io"
@@ -172,14 +166,14 @@ def on_message(client, userdata, msg):
             # Add new reading to history
             sensor_data.history.append({
                 "Timestamp": current_time,
-                "Noise_dB": sensor_data.data["noise_db"],
-                "Expansion_Valve_Outlet_Temp_C": sensor_data.data["expansion_valve_outlet_temp"],
-                "Condenser_Inlet_Temp_C": sensor_data.data["condenser_inlet_temp"],
-                "Ambient_Temp_C": sensor_data.data["ambient_temp"],
-                "Humidity_Percent": sensor_data.data["humidity"],
-                "Voltage_V": sensor_data.data["voltage"],
-                "Current_mA": sensor_data.data["current"],
-                "Power_mW": sensor_data.data["power"]
+                "Noise (dB)": sensor_data.data["noise_db"],
+                "Expansion Valve Outlet Temp (°C)": sensor_data.data["expansion_valve_outlet_temp"],
+                "Condenser Inlet Temp (°C)": sensor_data.data["condenser_inlet_temp"],
+                "Ambient Temp (°C)": sensor_data.data["ambient_temp"],
+                "Humidity (%)": sensor_data.data["humidity"],
+                "Voltage (V)": sensor_data.data["voltage"],
+                "Current (mA)": sensor_data.data["current"],
+                "Power (mW)": sensor_data.data["power"]
             })
             
             print(f"✓ Message #{sensor_data.data['count']}")
@@ -296,41 +290,39 @@ with col3:
 
 st.markdown("---")
 
-# Component Status Predictions
+# Component Status Predictions - ONLY Bearings and Radiator
 st.subheader("🔍 Component Status Predictions")
 
 # Safely get values for prediction
-# Models were trained with [noise_db, water_outlet_temp, water_flow]
-# Since we removed water_flow, we'll use 0.0 as a placeholder
+# Models expect 3 features in this order: [noise_db, water_outlet_temp, water_flow]
 noise_val = current.get('noise_db', 0.0)
 exp_valve_temp = current.get('expansion_valve_outlet_temp', 0.0)
 water_flow_placeholder = 0.0  # Placeholder for removed water_flow feature
 
-# Models expect 3 features in this order: [noise_db, water_outlet_temp, water_flow]
 values = [noise_val, exp_valve_temp, water_flow_placeholder]
 
 try:
-    p1 = bearings_model.predict([values])[0]
-    p2 = wpump_model.predict([values])[0]
-    p3 = radiator_model.predict([values])[0]
-    p4 = exvalve_model.predict([values])[0]
+    p_bearings = bearings_model.predict([values])[0]
+    p_radiator = radiator_model.predict([values])[0]
     
-    pred_col1, pred_col2, pred_col3, pred_col4 = st.columns(4)
+    # Only show Bearings and Radiator
+    pred_col1, pred_col2 = st.columns(2)
     
     with pred_col1:
-        st.metric("Bearings", f"{'🟢' if p1 == 0 else '🔴'} {'Normal' if p1 == 0 else 'Fault'}")
+        bearing_status = "Normal" if p_bearings == 0 else "Fault"
+        bearing_icon = "🟢" if p_bearings == 0 else "🔴"
+        st.metric("🔩 Bearings", f"{bearing_icon} {bearing_status}")
+        
     with pred_col2:
-        st.metric("Water Pump", f"{'🟢' if p2 == 0 else '🔴'} {'Normal' if p2 == 0 else 'Fault'}")
-    with pred_col3:
-        st.metric("Radiator", f"{'🟢' if p3 == 0 else '🔴'} {'Normal' if p3 == 0 else 'Fault'}")
-    with pred_col4:
-        st.metric("Exhaust Valve", f"{'🟢' if p4 == 0 else '🔴'} {'Normal' if p4 == 0 else 'Fault'}")
+        radiator_status = "Normal" if p_radiator == 0 else "Fault"
+        radiator_icon = "🟢" if p_radiator == 0 else "🔴"
+        st.metric("🌡️ Radiator", f"{radiator_icon} {radiator_status}")
     
     st.markdown("---")
     
-    faults = sum([p1, p2, p3, p4])
+    faults = sum([p_bearings, p_radiator])
     if faults == 0:
-        st.success("✅ All components operating normally")
+        st.success("✅ All monitored components operating normally")
     else:
         st.warning(f"⚠️ {faults} component(s) showing abnormal behavior")
     
@@ -346,10 +338,6 @@ with st.expander("📈 Graph View"):
         with sensor_data.lock:
             df_graph = pd.DataFrame(sensor_data.history.copy())
         
-        # Check if required columns exist
-        available_columns = df_graph.columns.tolist()
-        st.caption(f"Available data columns: {', '.join(available_columns)}")
-        
         df_graph["Count"] = range(1, len(df_graph) + 1)
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -362,29 +350,29 @@ with st.expander("📈 Graph View"):
         
         with tab1:
             st.subheader("Expansion Valve Outlet Temperature Over Time")
-            if 'Expansion_Valve_Outlet_Temp_C' in df_graph.columns:
-                st.plotly_chart(create_graph(df_graph, 'Expansion_Valve_Outlet_Temp_C', 'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'), use_container_width=True)
+            if 'Expansion Valve Outlet Temp (°C)' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Expansion Valve Outlet Temp (°C)', 'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'), use_container_width=True)
             else:
                 st.warning("⚠️ Expansion Valve Outlet Temperature data not available")
         
         with tab2:
             st.subheader("Condenser Inlet Temperature Over Time")
-            if 'Condenser_Inlet_Temp_C' in df_graph.columns:
-                st.plotly_chart(create_graph(df_graph, 'Condenser_Inlet_Temp_C', 'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'), use_container_width=True)
+            if 'Condenser Inlet Temp (°C)' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Condenser Inlet Temp (°C)', 'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'), use_container_width=True)
             else:
                 st.warning("⚠️ Condenser Inlet Temperature data not available")
         
         with tab3:
             st.subheader("Ambient Temperature Over Time")
-            if 'Ambient_Temp_C' in df_graph.columns:
-                st.plotly_chart(create_graph(df_graph, 'Ambient_Temp_C', 'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'), use_container_width=True)
+            if 'Ambient Temp (°C)' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Ambient Temp (°C)', 'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'), use_container_width=True)
             else:
                 st.warning("⚠️ Ambient Temperature data not available")
         
         with tab4:
             st.subheader("Humidity Over Time")
-            if 'Humidity_Percent' in df_graph.columns:
-                st.plotly_chart(create_graph(df_graph, 'Humidity_Percent', 'Humidity', 'Humidity (%)', '#95E1D3'), use_container_width=True)
+            if 'Humidity (%)' in df_graph.columns:
+                st.plotly_chart(create_graph(df_graph, 'Humidity (%)', 'Humidity', 'Humidity (%)', '#95E1D3'), use_container_width=True)
             else:
                 st.warning("⚠️ Humidity data not available")
 
@@ -395,12 +383,29 @@ with st.expander("📈 Graph View"):
     else:
         st.info(f"📊 Collecting data... ({history_len}/5 readings). Graphs will appear once 5 or more readings are available.")
 
-# Historical Data
+# Historical Data with proper column names
 with st.expander("📊 Historical Data"):
     if history_len > 0:
         with sensor_data.lock:
             df_history = pd.DataFrame(sensor_data.history.copy())
-        st.dataframe(df_history.tail(100), use_container_width=True, height=400)
+        
+        # Display with nice formatting
+        st.dataframe(
+            df_history.tail(100),
+            use_container_width=True,
+            height=400,
+            column_config={
+                "Timestamp": st.column_config.TextColumn("Timestamp", width="medium"),
+                "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
+                "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve Temp (°C)", format="%.2f"),
+                "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser Temp (°C)", format="%.2f"),
+                "Ambient Temp (°C)": st.column_config.NumberColumn("Ambient Temp (°C)", format="%.2f"),
+                "Humidity (%)": st.column_config.NumberColumn("Humidity (%)", format="%.2f"),
+                "Voltage (V)": st.column_config.NumberColumn("Voltage (V)", format="%.2f"),
+                "Current (mA)": st.column_config.NumberColumn("Current (mA)", format="%.2f"),
+                "Power (mW)": st.column_config.NumberColumn("Power (mW)", format="%.2f"),
+            }
+        )
         st.caption(f"Showing last 100 of {history_len} records")
     else:
         st.info("No data yet")
