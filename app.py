@@ -107,10 +107,10 @@ class SensorData:
     def __init__(self):
         self.data = {
             "noise_db": 0.0,
-            "water_outlet_temp": 0.0,
+            "expansion_valve_outlet_temp": 0.0,
+            "condenser_inlet_temp": 0.0,
             "ambient_temp": 0.0,
             "humidity": 0.0,
-            "water_flow": 0.0,
             "voltage": 0.0,
             "current": 0.0,
             "power": 0.0,
@@ -143,10 +143,10 @@ def on_message(client, userdata, msg):
         
         with sensor_data.lock:
             sensor_data.data["noise_db"] = float(payload.get("noise_db", 0))
-            sensor_data.data["water_outlet_temp"] = float(payload.get("water_outlet_temp", 0))
+            sensor_data.data["expansion_valve_outlet_temp"] = float(payload.get("expansion_valve_outlet_temp", 0))
+            sensor_data.data["condenser_inlet_temp"] = float(payload.get("condenser_inlet_temp", 0))
             sensor_data.data["ambient_temp"] = float(payload.get("ambient_temp", 0))
             sensor_data.data["humidity"] = float(payload.get("humidity", 0))
-            sensor_data.data["water_flow"] = float(payload.get("water_flow", 0))
             sensor_data.data["voltage"] = float(payload.get("voltage", 0))
             sensor_data.data["current"] = float(payload.get("current", 0))
             sensor_data.data["power"] = float(payload.get("power", 0))
@@ -163,10 +163,10 @@ def on_message(client, userdata, msg):
             sensor_data.history.append({
                 "Timestamp": current_time,
                 "Noise_dB": sensor_data.data["noise_db"],
-                "Water_Outlet_Temp_C": sensor_data.data["water_outlet_temp"],
+                "Expansion_Valve_Outlet_Temp_C": sensor_data.data["expansion_valve_outlet_temp"],
+                "Condenser_Inlet_Temp_C": sensor_data.data["condenser_inlet_temp"],
                 "Ambient_Temp_C": sensor_data.data["ambient_temp"],
                 "Humidity_Percent": sensor_data.data["humidity"],
-                "Water_Flow_Lpm": sensor_data.data["water_flow"],
                 "Voltage_V": sensor_data.data["voltage"],
                 "Current_mA": sensor_data.data["current"],
                 "Power_mW": sensor_data.data["power"]
@@ -259,8 +259,8 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.subheader("📊 Sensor Readings")
     st.metric("Noise", f"{current['noise_db']:.2f} dB")
-    st.metric("Water Outlet Temp", f"{current['water_outlet_temp']:.2f} °C")
-    st.metric("Water Flow", f"{current['water_flow']:.2f} L/min")
+    st.metric("Expansion Valve Outlet Temp", f"{current['expansion_valve_outlet_temp']:.2f} °C")
+    st.metric("Condenser Inlet Temp", f"{current['condenser_inlet_temp']:.2f} °C")
 
 with col2:
     st.subheader("🌡️ Environmental")
@@ -278,7 +278,7 @@ st.markdown("---")
 # Component Status Predictions
 st.subheader("🔍 Component Status Predictions")
 
-values = [current['noise_db'], current['water_outlet_temp'], current['water_flow']]
+values = [current['noise_db'], current['expansion_valve_outlet_temp']]
 
 try:
     p1 = bearings_model.predict([values])[0]
@@ -315,26 +315,31 @@ with st.expander("📈 Graph View"):
             df_graph = pd.DataFrame(sensor_data.history.copy())
         df_graph["Count"] = range(1, len(df_graph) + 1)
         
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🌡️ Water Outlet Temperature", 
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "🌡️ Expansion Valve Outlet Temp", 
+            "🌡️ Condenser Inlet Temp",
             "🌡️ Ambient Temperature", 
             "💧 Humidity", 
             "📈 Count Trend"
         ])
         
         with tab1:
-            st.subheader("Water Outlet Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Water_Outlet_Temp_C', 'Water Outlet Temperature', 'Temperature (°C)', '#FF6B6B'), use_container_width=True)
+            st.subheader("Expansion Valve Outlet Temperature Over Time")
+            st.plotly_chart(create_graph(df_graph, 'Expansion_Valve_Outlet_Temp_C', 'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'), use_container_width=True)
         
         with tab2:
+            st.subheader("Condenser Inlet Temperature Over Time")
+            st.plotly_chart(create_graph(df_graph, 'Condenser_Inlet_Temp_C', 'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'), use_container_width=True)
+        
+        with tab3:
             st.subheader("Ambient Temperature Over Time")
             st.plotly_chart(create_graph(df_graph, 'Ambient_Temp_C', 'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'), use_container_width=True)
         
-        with tab3:
+        with tab4:
             st.subheader("Humidity Over Time")
             st.plotly_chart(create_graph(df_graph, 'Humidity_Percent', 'Humidity', 'Humidity (%)', '#95E1D3'), use_container_width=True)
 
-        with tab4:
+        with tab5:
             st.subheader("📈 Data Reception Count Over Time")
             st.plotly_chart(create_graph(df_graph, 'Count', 'Data Reception Count', 'Message Count', '#FFB347'), use_container_width=True)
             
