@@ -1,5 +1,4 @@
 import streamlit as st
-from catboost import CatBoostClassifier
 import json
 import paho.mqtt.client as mqtt
 import time
@@ -14,7 +13,7 @@ import hashlib
 st.set_page_config(page_title="Fault Detection", page_icon="🔧", layout="wide")
 
 SL_TZ = pytz.timezone('Asia/Colombo')
-MAX_ROWS = 5000  # cap history length
+MAX_ROWS = 10000  # increased cap for more history
 
 def safe_float(x, default=0.0):
     try:
@@ -74,17 +73,6 @@ with col_logout:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# ===================== MODELS ===========================
-@st.cache_resource
-def load_models():
-    bearings = CatBoostClassifier()
-    bearings.load_model('bearings_trained_model.cbm')
-    radiator = CatBoostClassifier()
-    radiator.load_model('radiator_trained_model.cbm')
-    return bearings, radiator
-
-bearings_model, radiator_model = load_models()
-
 # ===================== MQTT SETUP =======================
 MQTT_BROKER = "broker.emqx.io"
 MQTT_PORT = 1883
@@ -133,6 +121,7 @@ def on_message(client, userdata, msg):
         now_dt = datetime.now(SL_TZ)
     
         ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")    # seconds
+        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")  # with microseconds - FIXED!
 
         # ---- validate payload; skip empty/heartbeat frames ----
         keys_of_interest = [
@@ -217,7 +206,7 @@ def create_graph(df, column, title, y_label, color_hex):
     return fig
 
 # ===================== APP BODY =========================
-st.title("🔧 AC Compressor Fault Detection")
+st.title("🔧 AC Compressor Monitoring Dashboard")
 
 with sensor_data.lock:
     current = sensor_data.data.copy()
@@ -233,11 +222,11 @@ st.markdown("---")
 
 # Controls
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("📊 Records", history_len)
+with c1: st.metric("📊 Total Records", history_len)
 with c2:
     if st.button("🔄 Refresh"): st.rerun()
 with c3:
-    if st.button("🗑️ Clear"):
+    if st.button("🗑️ Clear History"):
         with sensor_data.lock:
             sensor_data.history.clear()
         st.rerun()
@@ -246,7 +235,7 @@ with c4:
         with sensor_data.lock:
             df = pd.DataFrame(sensor_data.history.copy())
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 CSV", csv, f"data_{datetime.now(SL_TZ).strftime('%Y%m%d_%H%M%S')}.csv")
+        st.download_button("📥 Download CSV", csv, f"sensor_data_{datetime.now(SL_TZ).strftime('%Y%m%d_%H%M%S')}.csv")
 
 st.markdown("---")
 
@@ -269,132 +258,110 @@ with col3:
 
 st.markdown("---")
 
-# Predictions
-st.subheader("🔍 Component Status Predictions")
-noise_val = current.get('noise_db', 0.0)
-exp_valve_temp = current.get('expansion_valve_outlet_temp', 0.0)
-water_flow_placeholder = 0.0
-values = [noise_val, exp_valve_temp, water_flow_placeholder]
-
-try:
-    p_bearings = int(bearings_model.predict([values])[0])
-    p_radiator = int(radiator_model.predict([values])[0])
-
-    pc1, pc2 = st.columns(2)
-    with pc1:
-        st.metric("🔩 Bearings", f"{'🟢 Normal' if p_bearings==0 else '🔴 Fault'}")
-    with pc2:
-        st.metric("🌡️ Radiator", f"{'🟢 Normal' if p_radiator==0 else '🔴 Fault'}")
-
-    st.markdown("---")
-    faults = p_bearings + p_radiator
-    st.success("✅ All monitored components operating normally") if faults==0 \
-        else st.warning(f"⚠️ {faults} component(s) showing abnormal behavior")
-except Exception as e:
-    st.error(f"Prediction Error: {e}")
-
 # ===================== GRAPHS ===========================
-with st.expander("📈 Graph View"):
-    if history_len > 5:
-        with sensor_data.lock:
-            df_graph = pd.DataFrame(sensor_data.history.copy())
+st.subheader("📈 Real-Time Graphs")
+if history_len > 5:
+    with sensor_data.lock:
+        df_graph = pd.DataFrame(sensor_data.history.copy())
 
-        # Drop rows where all sensor columns are NaN/None (safety)
-        sensor_cols = [
-            "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
-            "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
-        ]
-        if len(df_graph)>0:
-            df_graph = df_graph.dropna(how="all", subset=sensor_cols)
+    # Drop rows where all sensor columns are NaN/None (safety)
+    sensor_cols = [
+        "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
+        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
+    ]
+    if len(df_graph)>0:
+        df_graph = df_graph.dropna(how="all", subset=sensor_cols)
 
-        # Sort by time and reset index
-        if "Timestamp" in df_graph.columns:
-            df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
+    # Sort by time and reset index
+    if "Timestamp" in df_graph.columns:
+        df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
 
-        # Ensure Count is monotonic (for display)
-        if "Count" not in df_graph.columns:
-            df_graph["Count"] = range(1, len(df_graph)+1)
+    # Ensure Count is monotonic (for display)
+    if "Count" not in df_graph.columns:
+        df_graph["Count"] = range(1, len(df_graph)+1)
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🌡️ Expansion Valve Outlet Temp",
-            "🌡️ Condenser Inlet Temp",
-            "🌡️ Ambient Temperature",
-            "💧 Humidity",
-            "📈 Count Trend"
-        ])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🌡️ Expansion Valve Outlet Temp",
+        "🌡️ Condenser Inlet Temp",
+        "🌡️ Ambient Temperature",
+        "💧 Humidity",
+        "⚡ Power Consumption",
+        "📈 Count Trend"
+    ])
 
-        with tab1:
-            st.subheader("Expansion Valve Outlet Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Expansion Valve Outlet Temp (°C)',
-                                         'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'),
-                            use_container_width=True)
+    with tab1:
+        st.plotly_chart(create_graph(df_graph, 'Expansion Valve Outlet Temp (°C)',
+                                     'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'),
+                        use_container_width=True)
 
-        with tab2:
-            st.subheader("Condenser Inlet Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Condenser Inlet Temp (°C)',
-                                         'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'),
-                            use_container_width=True)
+    with tab2:
+        st.plotly_chart(create_graph(df_graph, 'Condenser Inlet Temp (°C)',
+                                     'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'),
+                        use_container_width=True)
 
-        with tab3:
-            st.subheader("Ambient Temperature Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Ambient Temp (°C)',
-                                         'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'),
-                            use_container_width=True)
+    with tab3:
+        st.plotly_chart(create_graph(df_graph, 'Ambient Temp (°C)',
+                                     'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'),
+                        use_container_width=True)
 
-        with tab4:
-            st.subheader("Humidity Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Humidity (%)',
-                                         'Humidity', 'Humidity (%)', '#95E1D3'),
-                            use_container_width=True)
+    with tab4:
+        st.plotly_chart(create_graph(df_graph, 'Humidity (%)',
+                                     'Humidity', 'Humidity (%)', '#95E1D3'),
+                        use_container_width=True)
 
-        with tab5:
-            st.subheader("📈 Data Reception Count Over Time")
-            st.plotly_chart(create_graph(df_graph, 'Count',
-                                         'Data Reception Count', 'Message Count', '#FFB347'),
-                            use_container_width=True)
-    else:
-        st.info(f"📊 Collecting data... ({history_len}/5 readings). Graphs will appear once 5 or more readings are available.")
+    with tab5:
+        st.plotly_chart(create_graph(df_graph, 'Power (mW)',
+                                     'Power Consumption', 'Power (mW)', '#9B59B6'),
+                        use_container_width=True)
 
-# ===================== HISTORICAL TABLE =================
-with st.expander("📊 Historical Data"):
-    if history_len > 0:
-        with sensor_data.lock:
-            df_history = pd.DataFrame(sensor_data.history.copy())
+    with tab6:
+        st.plotly_chart(create_graph(df_graph, 'Count',
+                                     'Data Reception Count', 'Message Count', '#FFB347'),
+                        use_container_width=True)
+else:
+    st.info(f"📊 Collecting data... ({history_len}/5 readings). Graphs will appear once 5 or more readings are available.")
 
-        # Drop all-NaN sensor rows (prevents 'None' rows)
-        sensor_cols = [
-            "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
-            "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
-        ]
-        df_history = df_history.dropna(how="all", subset=sensor_cols)
+st.markdown("---")
 
-        # Desired column order: Count, Timestamp, then sensors
-        ordered_cols = ["Count", "Timestamp"] + sensor_cols
-        available_cols = [c for c in ordered_cols if c in df_history.columns]
-        df_display = df_history[available_cols].tail(100)
+# ===================== HISTORICAL TABLE - SHOWING ALL RECORDS =================
+st.subheader("📊 Historical Data - All Records")
+if history_len > 0:
+    with sensor_data.lock:
+        df_history = pd.DataFrame(sensor_data.history.copy())
 
-        st.dataframe(
-            df_display,
-            use_container_width=True,
-            height=420,
-            column_config={
-                "Count": st.column_config.NumberColumn("Count", format="%d"),
-                "Timestamp": st.column_config.TextColumn("Time (YYYY-MM-DD HH:MM:SS.ffffff)"),
-                "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
-                "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve Temp (°C)", format="%.2f"),
-                "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser Temp (°C)", format="%.2f"),
-                "Ambient Temp (°C)": st.column_config.NumberColumn("Ambient Temp (°C)", format="%.2f"),
-                "Humidity (%)": st.column_config.NumberColumn("Humidity (%)", format="%.2f"),
-                "Voltage (V)": st.column_config.NumberColumn("Voltage (V)", format="%.2f"),
-                "Current (mA)": st.column_config.NumberColumn("Current (mA)", format="%.2f"),
-                "Power (mW)": st.column_config.NumberColumn("Power (mW)", format="%.2f"),
-            }
-        )
-        st.caption(f"Showing last {len(df_display)} of {len(df_history)} records")
-    else:
-        st.info("No data yet")
+    # Drop all-NaN sensor rows (prevents 'None' rows)
+    sensor_cols = [
+        "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
+        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
+    ]
+    df_history = df_history.dropna(how="all", subset=sensor_cols)
+
+    # Desired column order: Count, Timestamp, then sensors
+    ordered_cols = ["Count", "Timestamp"] + sensor_cols
+    available_cols = [c for c in ordered_cols if c in df_history.columns]
+    df_display = df_history[available_cols]  # REMOVED .tail(100) - NOW SHOWING ALL!
+
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        height=600,  # Increased height for better viewing
+        column_config={
+            "Count": st.column_config.NumberColumn("Count", format="%d"),
+            "Timestamp": st.column_config.TextColumn("Time (YYYY-MM-DD HH:MM:SS.ffffff)"),
+            "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
+            "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve Temp (°C)", format="%.2f"),
+            "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser Temp (°C)", format="%.2f"),
+            "Ambient Temp (°C)": st.column_config.NumberColumn("Ambient Temp (°C)", format="%.2f"),
+            "Humidity (%)": st.column_config.NumberColumn("Humidity (%)", format="%.2f"),
+            "Voltage (V)": st.column_config.NumberColumn("Voltage (V)", format="%.2f"),
+            "Current (mA)": st.column_config.NumberColumn("Current (mA)", format="%.2f"),
+            "Power (mW)": st.column_config.NumberColumn("Power (mW)", format="%.2f"),
+        }
+    )
+    st.caption(f"📊 Showing all {len(df_display)} records (Max capacity: {MAX_ROWS} records)")
+else:
+    st.info("No data recorded yet. Waiting for sensor data from ESP32...")
 
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
 st.rerun()
-
