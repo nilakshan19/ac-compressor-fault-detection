@@ -94,6 +94,8 @@ class SensorData:
         }
         self.history = []  # list of dict rows
         self.lock = threading.Lock()
+        self.error_count = 0
+        self.last_error = None
 
 @st.cache_resource
 def get_sensor_data():
@@ -111,6 +113,7 @@ def on_connect(client, userdata, flags, rc):
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
+        print(f"📨 Received payload: {payload}")
 
         # Backward compatibility mappings
         if "water_outlet_temp" in payload and "expansion_valve_outlet_temp" not in payload:
@@ -119,9 +122,8 @@ def on_message(client, userdata, msg):
             payload["condenser_inlet_temp"] = 0.0
 
         now_dt = datetime.now(SL_TZ)
-    
-        ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")    # seconds
-        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")  # with microseconds - FIXED!
+        ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
 
         # ---- validate payload; skip empty/heartbeat frames ----
         keys_of_interest = [
@@ -129,11 +131,13 @@ def on_message(client, userdata, msg):
             "ambient_temp", "humidity", "voltage", "current", "power"
         ]
         has_any_value = any(k in payload for k in keys_of_interest)
+        
         if not has_any_value:
-            # do not append a blank row
+            print("⚠️ Skipping empty payload")
             return
 
         with sensor_data.lock:
+            # Update current data
             sensor_data.data["noise_db"] = safe_float(payload.get("noise_db", 0))
             sensor_data.data["expansion_valve_outlet_temp"] = safe_float(payload.get("expansion_valve_outlet_temp", 0))
             sensor_data.data["condenser_inlet_temp"] = safe_float(payload.get("condenser_inlet_temp", 0))
@@ -145,8 +149,8 @@ def on_message(client, userdata, msg):
             sensor_data.data["last_update"] = ts_status
             sensor_data.data["count"] += 1
 
-            # ------ append full row, including Count first ------
-            sensor_data.history.append({
+            # Create history row
+            history_row = {
                 "Count": sensor_data.data["count"],
                 "Timestamp": ts_hist,
                 "Noise (dB)": sensor_data.data["noise_db"],
@@ -157,26 +161,39 @@ def on_message(client, userdata, msg):
                 "Voltage (V)": sensor_data.data["voltage"],
                 "Current (mA)": sensor_data.data["current"],
                 "Power (mW)": sensor_data.data["power"]
-            })
+            }
+            
+            # Append to history
+            sensor_data.history.append(history_row)
+            
+            print(f"✓ Message #{sensor_data.data['count']} added to history. Total records: {len(sensor_data.history)}")
 
             # Cap history
             if len(sensor_data.history) > MAX_ROWS:
                 sensor_data.history = sensor_data.history[-MAX_ROWS:]
-
-            print(f"✓ Message #{sensor_data.data['count']}")
+                print(f"⚠️ History capped at {MAX_ROWS} records")
 
     except Exception as e:
-        print(f"✗ Error: {e}")
+        sensor_data.error_count += 1
+        sensor_data.last_error = str(e)
+        print(f"✗ Error in on_message: {e}")
+        import traceback
+        traceback.print_exc()
 
 @st.cache_resource
 def start_mqtt():
     client = mqtt.Client(client_id=f"Streamlit_{int(time.time())}")
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    thread = threading.Thread(target=client.loop_forever, daemon=True)
-    thread.start()
-    return client
+    try:
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        thread = threading.Thread(target=client.loop_forever, daemon=True)
+        thread.start()
+        print(f"✓ MQTT client started")
+        return client
+    except Exception as e:
+        print(f"✗ Failed to start MQTT: {e}")
+        return None
 
 mqtt_client = start_mqtt()
 
@@ -191,7 +208,7 @@ def create_graph(df, column, title, y_label, color_hex):
         fig.add_trace(go.Scatter(
             x=df['Timestamp'],
             y=df[column],
-            mode='lines',                     # <<< LINE ONLY
+            mode='lines',
             name=y_label,
             line=dict(color=color_hex, width=2)
         ))
@@ -211,31 +228,54 @@ st.title("🔧 AC Compressor Monitoring Dashboard")
 with sensor_data.lock:
     current = sensor_data.data.copy()
     history_len = len(sensor_data.history)
+    error_count = sensor_data.error_count
+    last_error = sensor_data.last_error
 
 # Status
-if current["count"] > 0:
-    st.success(f"🟢 LIVE | Messages: {current['count']} | Last: {current['last_update']}")
-else:
-    st.warning("🟡 Waiting for data from ESP32...")
+col_status1, col_status2 = st.columns([3, 1])
+with col_status1:
+    if current["count"] > 0:
+        st.success(f"🟢 LIVE | Messages: {current['count']} | Last: {current['last_update']}")
+    else:
+        st.warning("🟡 Waiting for data from ESP32...")
+with col_status2:
+    if error_count > 0:
+        st.error(f"⚠️ Errors: {error_count}")
+        if last_error:
+            st.caption(f"Last error: {last_error[:50]}")
 
 st.markdown("---")
 
 # Controls
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("📊 Total Records", history_len)
+with c1: 
+    st.metric("📊 Total Records", history_len, delta=None if history_len == 0 else f"+{history_len}")
 with c2:
-    if st.button("🔄 Refresh"): st.rerun()
+    if st.button("🔄 Refresh", use_container_width=True): 
+        st.rerun()
 with c3:
-    if st.button("🗑️ Clear History"):
+    if st.button("🗑️ Clear History", use_container_width=True):
         with sensor_data.lock:
             sensor_data.history.clear()
+            sensor_data.data["count"] = 0
+        st.success("✅ History cleared!")
+        time.sleep(1)
         st.rerun()
 with c4:
+    # CSV Download - Always show button
     if history_len > 0:
         with sensor_data.lock:
-            df = pd.DataFrame(sensor_data.history.copy())
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download CSV", csv, f"sensor_data_{datetime.now(SL_TZ).strftime('%Y%m%d_%H%M%S')}.csv")
+            df_download = pd.DataFrame(sensor_data.history.copy())
+        csv = df_download.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name=f"sensor_data_{datetime.now(SL_TZ).strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    else:
+        st.button("📥 Download CSV", disabled=True, use_container_width=True)
 
 st.markdown("---")
 
@@ -264,94 +304,97 @@ if history_len > 5:
     with sensor_data.lock:
         df_graph = pd.DataFrame(sensor_data.history.copy())
 
-    # Drop rows where all sensor columns are NaN/None (safety)
+    # Drop rows where all sensor columns are NaN/None
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
         "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
     ]
-    if len(df_graph)>0:
+    if len(df_graph) > 0:
         df_graph = df_graph.dropna(how="all", subset=sensor_cols)
 
-    # Sort by time and reset index
-    if "Timestamp" in df_graph.columns:
+    # Sort by time
+    if "Timestamp" in df_graph.columns and len(df_graph) > 0:
         df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
 
-    # Ensure Count is monotonic (for display)
-    if "Count" not in df_graph.columns:
-        df_graph["Count"] = range(1, len(df_graph)+1)
+    if len(df_graph) > 0:
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "🌡️ Expansion Valve Outlet",
+            "🌡️ Condenser Inlet",
+            "🌡️ Ambient Temp",
+            "💧 Humidity",
+            "⚡ Power",
+            "📈 Message Count"
+        ])
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🌡️ Expansion Valve Outlet Temp",
-        "🌡️ Condenser Inlet Temp",
-        "🌡️ Ambient Temperature",
-        "💧 Humidity",
-        "⚡ Power Consumption",
-        "📈 Count Trend"
-    ])
+        with tab1:
+            st.plotly_chart(create_graph(df_graph, 'Expansion Valve Outlet Temp (°C)',
+                                         'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'),
+                            use_container_width=True)
 
-    with tab1:
-        st.plotly_chart(create_graph(df_graph, 'Expansion Valve Outlet Temp (°C)',
-                                     'Expansion Valve Outlet Temperature', 'Temperature (°C)', '#FF6B6B'),
-                        use_container_width=True)
+        with tab2:
+            st.plotly_chart(create_graph(df_graph, 'Condenser Inlet Temp (°C)',
+                                         'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'),
+                            use_container_width=True)
 
-    with tab2:
-        st.plotly_chart(create_graph(df_graph, 'Condenser Inlet Temp (°C)',
-                                     'Condenser Inlet Temperature', 'Temperature (°C)', '#FFA07A'),
-                        use_container_width=True)
+        with tab3:
+            st.plotly_chart(create_graph(df_graph, 'Ambient Temp (°C)',
+                                         'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'),
+                            use_container_width=True)
 
-    with tab3:
-        st.plotly_chart(create_graph(df_graph, 'Ambient Temp (°C)',
-                                     'Ambient Temperature', 'Temperature (°C)', '#4ECDC4'),
-                        use_container_width=True)
+        with tab4:
+            st.plotly_chart(create_graph(df_graph, 'Humidity (%)',
+                                         'Humidity', 'Humidity (%)', '#95E1D3'),
+                            use_container_width=True)
 
-    with tab4:
-        st.plotly_chart(create_graph(df_graph, 'Humidity (%)',
-                                     'Humidity', 'Humidity (%)', '#95E1D3'),
-                        use_container_width=True)
+        with tab5:
+            st.plotly_chart(create_graph(df_graph, 'Power (mW)',
+                                         'Power Consumption', 'Power (mW)', '#9B59B6'),
+                            use_container_width=True)
 
-    with tab5:
-        st.plotly_chart(create_graph(df_graph, 'Power (mW)',
-                                     'Power Consumption', 'Power (mW)', '#9B59B6'),
-                        use_container_width=True)
-
-    with tab6:
-        st.plotly_chart(create_graph(df_graph, 'Count',
-                                     'Data Reception Count', 'Message Count', '#FFB347'),
-                        use_container_width=True)
+        with tab6:
+            st.plotly_chart(create_graph(df_graph, 'Count',
+                                         'Data Reception Count', 'Message Count', '#FFB347'),
+                            use_container_width=True)
+    else:
+        st.info("No valid data for graphing yet.")
 else:
     st.info(f"📊 Collecting data... ({history_len}/5 readings). Graphs will appear once 5 or more readings are available.")
 
 st.markdown("---")
 
-# ===================== HISTORICAL TABLE - SHOWING ALL RECORDS =================
+# ===================== HISTORICAL TABLE =================
 st.subheader("📊 Historical Data - All Records")
 if history_len > 0:
     with sensor_data.lock:
         df_history = pd.DataFrame(sensor_data.history.copy())
 
-    # Drop all-NaN sensor rows (prevents 'None' rows)
+    # Drop all-NaN sensor rows
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
         "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
     ]
     df_history = df_history.dropna(how="all", subset=sensor_cols)
 
-    # Desired column order: Count, Timestamp, then sensors
+    # Sort by Count to show latest at bottom
+    if "Count" in df_history.columns:
+        df_history = df_history.sort_values("Count", ascending=True).reset_index(drop=True)
+
+    # Desired column order
     ordered_cols = ["Count", "Timestamp"] + sensor_cols
     available_cols = [c for c in ordered_cols if c in df_history.columns]
-    df_display = df_history[available_cols]  # REMOVED .tail(100) - NOW SHOWING ALL!
+    df_display = df_history[available_cols]
 
     st.dataframe(
         df_display,
         use_container_width=True,
-        height=600,  # Increased height for better viewing
+        height=600,
         column_config={
             "Count": st.column_config.NumberColumn("Count", format="%d"),
-            "Timestamp": st.column_config.TextColumn("Time (YYYY-MM-DD HH:MM:SS.ffffff)"),
+            "Timestamp": st.column_config.TextColumn("Timestamp"),
             "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
-            "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve Temp (°C)", format="%.2f"),
-            "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser Temp (°C)", format="%.2f"),
-            "Ambient Temp (°C)": st.column_config.NumberColumn("Ambient Temp (°C)", format="%.2f"),
+            "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve (°C)", format="%.2f"),
+            "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser (°C)", format="%.2f"),
+            "Ambient Temp (°C)": st.column_config.NumberColumn("Ambient (°C)", format="%.2f"),
             "Humidity (%)": st.column_config.NumberColumn("Humidity (%)", format="%.2f"),
             "Voltage (V)": st.column_config.NumberColumn("Voltage (V)", format="%.2f"),
             "Current (mA)": st.column_config.NumberColumn("Current (mA)", format="%.2f"),
@@ -360,7 +403,18 @@ if history_len > 0:
     )
     st.caption(f"📊 Showing all {len(df_display)} records (Max capacity: {MAX_ROWS} records)")
 else:
-    st.info("No data recorded yet. Waiting for sensor data from ESP32...")
+    st.info("📭 No data recorded yet. Waiting for sensor data from ESP32...")
+    st.caption("Make sure your ESP32 is connected and publishing to the MQTT topic.")
+
+# Debug info (optional - can be removed in production)
+with st.expander("🔧 Debug Information"):
+    st.write(f"**MQTT Broker:** {MQTT_BROKER}")
+    st.write(f"**MQTT Topic:** {MQTT_TOPIC}")
+    st.write(f"**History Length:** {history_len}")
+    st.write(f"**Message Count:** {current['count']}")
+    st.write(f"**Error Count:** {error_count}")
+    if last_error:
+        st.write(f"**Last Error:** {last_error}")
 
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
