@@ -13,7 +13,7 @@ import hashlib
 st.set_page_config(page_title="Fault Detection", page_icon="🔧", layout="wide")
 
 SL_TZ = pytz.timezone('Asia/Colombo')
-MAX_ROWS = 10000  # increased cap for more history
+MAX_ROWS = 10000
 
 def safe_float(x, default=0.0):
     try:
@@ -92,7 +92,7 @@ class SensorData:
             "last_update": "Waiting...",
             "count": 0
         }
-        self.history = []  # list of dict rows
+        self.history = []
         self.lock = threading.Lock()
 
 @st.cache_resource
@@ -113,17 +113,17 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode("utf-8"))
         print(f"📨 Received payload: {payload}")
 
-        # Backward compatibility mappings
+        # Backward compatibility
         if "water_outlet_temp" in payload and "expansion_valve_outlet_temp" not in payload:
             payload["expansion_valve_outlet_temp"] = payload["water_outlet_temp"]
         if "condenser_inlet_temp" not in payload:
             payload["condenser_inlet_temp"] = 0.0
 
+        # *** TIMESTAMP - ONLY SECONDS, NO MILLISECONDS ***
         now_dt = datetime.now(SL_TZ)
-        ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S")  # Only seconds, no milliseconds
+        ts = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # ---- validate payload; skip empty/heartbeat frames ----
+        # Validate payload
         keys_of_interest = [
             "noise_db", "expansion_valve_outlet_temp", "condenser_inlet_temp",
             "ambient_temp", "humidity", "voltage", "current", "power"
@@ -144,13 +144,13 @@ def on_message(client, userdata, msg):
             sensor_data.data["voltage"] = safe_float(payload.get("voltage", 0))
             sensor_data.data["current"] = safe_float(payload.get("current", 0))
             sensor_data.data["power"] = safe_float(payload.get("power", 0))
-            sensor_data.data["last_update"] = ts_status
+            sensor_data.data["last_update"] = ts
             sensor_data.data["count"] += 1
 
-            # Create history row
+            # Create history row - TIMESTAMP WITHOUT MILLISECONDS
             history_row = {
                 "Count": sensor_data.data["count"],
-                "Timestamp": ts_hist,
+                "Timestamp": ts,
                 "Noise (dB)": sensor_data.data["noise_db"],
                 "Expansion Valve Outlet Temp (°C)": sensor_data.data["expansion_valve_outlet_temp"],
                 "Condenser Inlet Temp (°C)": sensor_data.data["condenser_inlet_temp"],
@@ -161,15 +161,12 @@ def on_message(client, userdata, msg):
                 "Power (mW)": sensor_data.data["power"]
             }
             
-            # Append to history
             sensor_data.history.append(history_row)
-            
-            print(f"✓ Message #{sensor_data.data['count']} added to history. Total records: {len(sensor_data.history)}")
+            print(f"✓ Message #{sensor_data.data['count']} - Timestamp: {ts}")
 
             # Cap history
             if len(sensor_data.history) > MAX_ROWS:
                 sensor_data.history = sensor_data.history[-MAX_ROWS:]
-                print(f"⚠️ History capped at {MAX_ROWS} records")
 
     except Exception as e:
         print(f"✗ Error in on_message: {e}")
@@ -195,10 +192,9 @@ mqtt_client = start_mqtt()
 
 # ===================== UI HELPERS =======================
 def create_graph(df, column, title, y_label, color_hex):
-    """Line-only Plotly graph (no markers)"""
     fig = go.Figure()
     if column not in df.columns:
-        fig.add_annotation(text=f"Column '{column}' not found in data",
+        fig.add_annotation(text=f"Column '{column}' not found",
                            xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
     else:
         fig.add_trace(go.Scatter(
@@ -249,7 +245,6 @@ with c3:
         time.sleep(1)
         st.rerun()
 with c4:
-    # CSV Download - Always show button
     if history_len > 0:
         with sensor_data.lock:
             df_download = pd.DataFrame(sensor_data.history.copy())
@@ -291,7 +286,6 @@ if history_len > 5:
     with sensor_data.lock:
         df_graph = pd.DataFrame(sensor_data.history.copy())
 
-    # Drop rows where all sensor columns are NaN/None
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
         "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
@@ -299,7 +293,6 @@ if history_len > 5:
     if len(df_graph) > 0:
         df_graph = df_graph.dropna(how="all", subset=sensor_cols)
 
-    # Sort by time
     if "Timestamp" in df_graph.columns and len(df_graph) > 0:
         df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
 
@@ -355,18 +348,15 @@ if history_len > 0:
     with sensor_data.lock:
         df_history = pd.DataFrame(sensor_data.history.copy())
 
-    # Drop all-NaN sensor rows
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
         "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
     ]
     df_history = df_history.dropna(how="all", subset=sensor_cols)
 
-    # Sort by Count to show latest at bottom
     if "Count" in df_history.columns:
         df_history = df_history.sort_values("Count", ascending=True).reset_index(drop=True)
 
-    # Desired column order
     ordered_cols = ["Count", "Timestamp"] + sensor_cols
     available_cols = [c for c in ordered_cols if c in df_history.columns]
     df_display = df_history[available_cols]
@@ -377,7 +367,7 @@ if history_len > 0:
         height=600,
         column_config={
             "Count": st.column_config.NumberColumn("Count", format="%d"),
-            "Timestamp": st.column_config.TextColumn("Timestamp (YYYY-MM-DD HH:MM:SS)"),
+            "Timestamp": st.column_config.TextColumn("Time"),
             "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
             "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve (°C)", format="%.2f"),
             "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser (°C)", format="%.2f"),
@@ -388,7 +378,7 @@ if history_len > 0:
             "Power (mW)": st.column_config.NumberColumn("Power (mW)", format="%.2f"),
         }
     )
-    st.caption(f"📊 Showing all {len(df_display)} records (Max capacity: {MAX_ROWS} records)")
+    st.caption(f"📊 Showing all {len(df_display)} records | Format: YYYY-MM-DD HH:MM:SS")
 else:
     st.info("📭 No data recorded yet. Waiting for sensor data from ESP32...")
 
@@ -399,6 +389,7 @@ with st.expander("🔧 Debug Information"):
     st.write(f"**History Length:** {history_len}")
     st.write(f"**Message Count:** {current['count']}")
     st.write(f"**Last Update:** {current['last_update']}")
+    st.write(f"**Timestamp Format:** YYYY-MM-DD HH:MM:SS (no milliseconds)")
 
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
