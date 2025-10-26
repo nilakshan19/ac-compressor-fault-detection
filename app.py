@@ -94,8 +94,6 @@ class SensorData:
         }
         self.history = []  # list of dict rows
         self.lock = threading.Lock()
-        self.error_count = 0
-        self.last_error = None
 
 @st.cache_resource
 def get_sensor_data():
@@ -174,8 +172,6 @@ def on_message(client, userdata, msg):
                 print(f"⚠️ History capped at {MAX_ROWS} records")
 
     except Exception as e:
-        sensor_data.error_count += 1
-        sensor_data.last_error = str(e)
         print(f"✗ Error in on_message: {e}")
         import traceback
         traceback.print_exc()
@@ -228,28 +224,19 @@ st.title("🔧 AC Compressor Monitoring Dashboard")
 with sensor_data.lock:
     current = sensor_data.data.copy()
     history_len = len(sensor_data.history)
-    error_count = sensor_data.error_count
-    last_error = sensor_data.last_error
 
 # Status
-col_status1, col_status2 = st.columns([3, 1])
-with col_status1:
-    if current["count"] > 0:
-        st.success(f"🟢 LIVE | Messages: {current['count']} | Last: {current['last_update']}")
-    else:
-        st.warning("🟡 Waiting for data from ESP32...")
-with col_status2:
-    if error_count > 0:
-        st.error(f"⚠️ Errors: {error_count}")
-        if last_error:
-            st.caption(f"Last error: {last_error[:50]}")
+if current["count"] > 0:
+    st.success(f"🟢 LIVE | Messages: {current['count']} | Last: {current['last_update']}")
+else:
+    st.warning("🟡 Waiting for data from ESP32...")
 
 st.markdown("---")
 
 # Controls
 c1, c2, c3, c4 = st.columns(4)
 with c1: 
-    st.metric("📊 Total Records", history_len, delta=None if history_len == 0 else f"+{history_len}")
+    st.metric("📊 Total Records", history_len)
 with c2:
     if st.button("🔄 Refresh", use_container_width=True): 
         st.rerun()
@@ -318,7 +305,7 @@ if history_len > 5:
 
     if len(df_graph) > 0:
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "🌡️ Expansion Valve Outlet",
+            "🌡️ Expansion Valve",
             "🌡️ Condenser Inlet",
             "🌡️ Ambient Temp",
             "💧 Humidity",
@@ -404,17 +391,14 @@ if history_len > 0:
     st.caption(f"📊 Showing all {len(df_display)} records (Max capacity: {MAX_ROWS} records)")
 else:
     st.info("📭 No data recorded yet. Waiting for sensor data from ESP32...")
-    st.caption("Make sure your ESP32 is connected and publishing to the MQTT topic.")
 
-# Debug info (optional - can be removed in production)
+# Debug info
 with st.expander("🔧 Debug Information"):
     st.write(f"**MQTT Broker:** {MQTT_BROKER}")
     st.write(f"**MQTT Topic:** {MQTT_TOPIC}")
     st.write(f"**History Length:** {history_len}")
     st.write(f"**Message Count:** {current['count']}")
-    st.write(f"**Error Count:** {error_count}")
-    if last_error:
-        st.write(f"**Last Error:** {last_error}")
+    st.write(f"**Last Update:** {current['last_update']}")
 
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
