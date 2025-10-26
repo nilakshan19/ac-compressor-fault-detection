@@ -121,7 +121,7 @@ def on_message(client, userdata, msg):
 
         now_dt = datetime.now(SL_TZ)
         ts_status = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+        ts_hist = now_dt.strftime("%Y-%m-%d %H:%M:%S")  # Only seconds, no milliseconds
 
         # ---- validate payload; skip empty/heartbeat frames ----
         keys_of_interest = [
@@ -377,7 +377,7 @@ if history_len > 0:
         height=600,
         column_config={
             "Count": st.column_config.NumberColumn("Count", format="%d"),
-            "Timestamp": st.column_config.TextColumn("Timestamp"),
+            "Timestamp": st.column_config.TextColumn("Timestamp (YYYY-MM-DD HH:MM:SS)"),
             "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
             "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve (°C)", format="%.2f"),
             "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser (°C)", format="%.2f"),
