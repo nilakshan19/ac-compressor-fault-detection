@@ -282,9 +282,7 @@ with col3:
     st.metric("Power", f"{current.get('power', 0.0):.2f} mW")
 with col4:
     st.subheader("📳 Vibration")
-    vib = current.get('vibration', 0.0)
-    st.metric("Vibration", f"{vib:.2f} m/s²")
-    
+    st.metric("Vibration", f"{current.get('vibration', 0.0):.2f} m/s²")
 
 st.markdown("---")
 
@@ -415,4 +413,3 @@ with st.expander("🔧 Debug Information"):
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
 st.rerun()
-
