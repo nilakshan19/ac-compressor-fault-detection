@@ -89,6 +89,7 @@ class SensorData:
             "voltage": 0.0,
             "current": 0.0,
             "power": 0.0,
+            "vibration": 0.0,  # ✅ ADDED VIBRATION
             "last_update": "Waiting...",
             "count": 0
         }
@@ -126,7 +127,7 @@ def on_message(client, userdata, msg):
         # Validate payload
         keys_of_interest = [
             "noise_db", "expansion_valve_outlet_temp", "condenser_inlet_temp",
-            "ambient_temp", "humidity", "voltage", "current", "power"
+            "ambient_temp", "humidity", "voltage", "current", "power", "vibration"  # ✅ ADDED VIBRATION
         ]
         has_any_value = any(k in payload for k in keys_of_interest)
         
@@ -144,6 +145,7 @@ def on_message(client, userdata, msg):
             sensor_data.data["voltage"] = safe_float(payload.get("voltage", 0))
             sensor_data.data["current"] = safe_float(payload.get("current", 0))
             sensor_data.data["power"] = safe_float(payload.get("power", 0))
+            sensor_data.data["vibration"] = safe_float(payload.get("vibration", 0))  # ✅ ADDED VIBRATION
             sensor_data.data["last_update"] = ts
             sensor_data.data["count"] += 1
 
@@ -158,7 +160,8 @@ def on_message(client, userdata, msg):
                 "Humidity (%)": sensor_data.data["humidity"],
                 "Voltage (V)": sensor_data.data["voltage"],
                 "Current (mA)": sensor_data.data["current"],
-                "Power (mW)": sensor_data.data["power"]
+                "Power (mW)": sensor_data.data["power"],
+                "Vibration (m/s²)": sensor_data.data["vibration"]  # ✅ ADDED VIBRATION
             }
             
             sensor_data.history.append(history_row)
@@ -261,8 +264,8 @@ with c4:
 
 st.markdown("---")
 
-# Current readings
-col1, col2, col3 = st.columns(3)
+# Current readings - ✅ ADDED VIBRATION METRIC
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.subheader("📊 Sensor Readings")
     st.metric("Noise", f"{current.get('noise_db', 0.0):.2f} dB")
@@ -277,6 +280,20 @@ with col3:
     st.metric("Voltage", f"{current.get('voltage', 0.0):.2f} V")
     st.metric("Current", f"{current.get('current', 0.0):.2f} mA")
     st.metric("Power", f"{current.get('power', 0.0):.2f} mW")
+with col4:
+    st.subheader("📳 Vibration")  # ✅ ADDED VIBRATION DISPLAY
+    vib = current.get('vibration', 0.0)
+    st.metric("Vibration", f"{vib:.2f} m/s²")
+    
+    # ✅ ADDED VIBRATION STATUS INDICATOR
+    if vib < 12.0:
+        st.success("🟢 LOW")
+    elif vib < 15.0:
+        st.info("🔵 NORMAL")
+    elif vib < 20.0:
+        st.warning("🟡 HIGH")
+    else:
+        st.error("🔴 CRITICAL")
 
 st.markdown("---")
 
@@ -288,7 +305,7 @@ if history_len > 5:
 
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
-        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
+        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)","Vibration (m/s²)"  # ✅ ADDED VIBRATION
     ]
     if len(df_graph) > 0:
         df_graph = df_graph.dropna(how="all", subset=sensor_cols)
@@ -297,12 +314,14 @@ if history_len > 5:
         df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
 
     if len(df_graph) > 0:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        # ✅ ADDED VIBRATION TAB
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
             "🌡️ Expansion Valve",
             "🌡️ Condenser Inlet",
             "🌡️ Ambient Temp",
             "💧 Humidity",
             "⚡ Power",
+            "📳 Vibration",  # ✅ NEW TAB
             "📈 Message Count"
         ])
 
@@ -331,7 +350,13 @@ if history_len > 5:
                                          'Power Consumption', 'Power (mW)', '#9B59B6'),
                             use_container_width=True)
 
+        # ✅ ADDED VIBRATION GRAPH
         with tab6:
+            st.plotly_chart(create_graph(df_graph, 'Vibration (m/s²)',
+                                         'Vibration Magnitude', 'Vibration (m/s²)', '#FF1744'),
+                            use_container_width=True)
+
+        with tab7:
             st.plotly_chart(create_graph(df_graph, 'Count',
                                          'Data Reception Count', 'Message Count', '#FFB347'),
                             use_container_width=True)
@@ -350,7 +375,7 @@ if history_len > 0:
 
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
-        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
+        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)","Vibration (m/s²)"  # ✅ ADDED VIBRATION
     ]
     df_history = df_history.dropna(how="all", subset=sensor_cols)
 
@@ -376,6 +401,7 @@ if history_len > 0:
             "Voltage (V)": st.column_config.NumberColumn("Voltage (V)", format="%.2f"),
             "Current (mA)": st.column_config.NumberColumn("Current (mA)", format="%.2f"),
             "Power (mW)": st.column_config.NumberColumn("Power (mW)", format="%.2f"),
+            "Vibration (m/s²)": st.column_config.NumberColumn("Vibration (m/s²)", format="%.2f"),  # ✅ ADDED VIBRATION
         }
     )
     st.caption(f"📊 Showing all {len(df_display)} records | Format: YYYY-MM-DD HH:MM:SS")
@@ -394,3 +420,29 @@ with st.expander("🔧 Debug Information"):
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
 st.rerun()
+```
+
+---
+
+## ✅ **WHAT I ADDED:**
+
+1. ✅ **Line 93:** Added `"vibration": 0.0` to SensorData
+2. ✅ **Line 127:** Added `"vibration"` to keys_of_interest
+3. ✅ **Line 149:** Added vibration data parsing from MQTT
+4. ✅ **Line 165:** Added vibration to history row
+5. ✅ **Lines 287-296:** Added 4th column with vibration metric and status indicator
+6. ✅ **Line 330:** Added vibration to sensor_cols list
+7. ✅ **Line 335:** Added "📳 Vibration" tab
+8. ✅ **Lines 370-372:** Added vibration graph in new tab
+9. ✅ **Line 394:** Added vibration to historical table sensor_cols
+10. ✅ **Line 422:** Added vibration column config for table
+
+---
+
+## 📊 **WHAT YOU'LL SEE:**
+
+### Vibration Metric Display:
+```
+📳 Vibration
+9.82 m/s²
+🟢 LOW
