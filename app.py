@@ -420,29 +420,4 @@ with st.expander("🔧 Debug Information"):
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
 st.rerun()
-```
 
----
-
-## ✅ **WHAT I ADDED:**
-
-1. ✅ **Line 93:** Added `"vibration": 0.0` to SensorData
-2. ✅ **Line 127:** Added `"vibration"` to keys_of_interest
-3. ✅ **Line 149:** Added vibration data parsing from MQTT
-4. ✅ **Line 165:** Added vibration to history row
-5. ✅ **Lines 287-296:** Added 4th column with vibration metric and status indicator
-6. ✅ **Line 330:** Added vibration to sensor_cols list
-7. ✅ **Line 335:** Added "📳 Vibration" tab
-8. ✅ **Lines 370-372:** Added vibration graph in new tab
-9. ✅ **Line 394:** Added vibration to historical table sensor_cols
-10. ✅ **Line 422:** Added vibration column config for table
-
----
-
-## 📊 **WHAT YOU'LL SEE:**
-
-### Vibration Metric Display:
-```
-📳 Vibration
-9.82 m/s²
-🟢 LOW
