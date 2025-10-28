@@ -203,9 +203,10 @@ def create_graph(df, column, title, y_label, color_hex):
         fig.add_trace(go.Scatter(
             x=df['Timestamp'],
             y=df[column],
-            mode='lines',
+            mode='lines+markers',
             name=y_label,
-            line=dict(color=color_hex, width=2)
+            line=dict(color=color_hex, width=2),
+            marker=dict(size=6, color=color_hex)
         ))
     fig.update_layout(
         title=title,
