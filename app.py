@@ -306,7 +306,10 @@ if history_len > 5:
         "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)","Vibration (m/s²)"
     ]
     if len(df_graph) > 0:
-        df_graph = df_graph.dropna(how="all", subset=sensor_cols)
+        # Only use columns that exist in the dataframe
+        existing_cols = [col for col in sensor_cols if col in df_graph.columns]
+        if existing_cols:
+            df_graph = df_graph.dropna(how="all", subset=existing_cols)
 
     if "Timestamp" in df_graph.columns and len(df_graph) > 0:
         df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
@@ -373,7 +376,10 @@ if history_len > 0:
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
         "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)","Vibration (m/s²)"
     ]
-    df_history = df_history.dropna(how="all", subset=sensor_cols)
+    # Only use columns that exist in the dataframe
+    existing_cols = [col for col in sensor_cols if col in df_history.columns]
+    if existing_cols:
+        df_history = df_history.dropna(how="all", subset=existing_cols)
 
     if "Count" in df_history.columns:
         df_history = df_history.sort_values("Count", ascending=True).reset_index(drop=True)
