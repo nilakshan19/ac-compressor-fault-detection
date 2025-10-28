@@ -284,14 +284,7 @@ with col4:
     st.subheader("📳 Vibration")
     vib = current.get('vibration', 0.0)
     st.metric("Vibration", f"{vib:.2f} m/s²")
-    if vib < 12.0:
-        st.success("🟢 LOW")
-    elif vib < 15.0:
-        st.info("🔵 NORMAL")
-    elif vib < 20.0:
-        st.warning("🟡 HIGH")
-    else:
-        st.error("🔴 CRITICAL")
+    
 
 st.markdown("---")
 
@@ -422,3 +415,4 @@ with st.expander("🔧 Debug Information"):
 # ===================== AUTO REFRESH =====================
 time.sleep(4)
 st.rerun()
+
