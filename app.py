@@ -89,7 +89,6 @@ class SensorData:
             "voltage": 0.0,
             "current": 0.0,
             "power": 0.0,
-            "vibration": 0.0,
             "last_update": "Waiting...",
             "count": 0
         }
@@ -120,23 +119,18 @@ def on_message(client, userdata, msg):
         if "condenser_inlet_temp" not in payload:
             payload["condenser_inlet_temp"] = 0.0
 
-        # *** TIMESTAMP - ONLY SECONDS, NO MILLISECONDS ***
         now_dt = datetime.now(SL_TZ)
         ts = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Validate payload
         keys_of_interest = [
             "noise_db", "expansion_valve_outlet_temp", "condenser_inlet_temp",
-            "ambient_temp", "humidity", "voltage", "current", "power", "vibration"
+            "ambient_temp", "humidity", "voltage", "current", "power"
         ]
-        has_any_value = any(k in payload for k in keys_of_interest)
-        
-        if not has_any_value:
+        if not any(k in payload for k in keys_of_interest):
             print("⚠️ Skipping empty payload")
             return
 
         with sensor_data.lock:
-            # Update current data
             sensor_data.data["noise_db"] = safe_float(payload.get("noise_db", 0))
             sensor_data.data["expansion_valve_outlet_temp"] = safe_float(payload.get("expansion_valve_outlet_temp", 0))
             sensor_data.data["condenser_inlet_temp"] = safe_float(payload.get("condenser_inlet_temp", 0))
@@ -145,11 +139,9 @@ def on_message(client, userdata, msg):
             sensor_data.data["voltage"] = safe_float(payload.get("voltage", 0))
             sensor_data.data["current"] = safe_float(payload.get("current", 0))
             sensor_data.data["power"] = safe_float(payload.get("power", 0))
-            sensor_data.data["vibration"] = safe_float(payload.get("vibration", 0))
             sensor_data.data["last_update"] = ts
             sensor_data.data["count"] += 1
 
-            # Create history row - TIMESTAMP WITHOUT MILLISECONDS
             history_row = {
                 "Count": sensor_data.data["count"],
                 "Timestamp": ts,
@@ -160,14 +152,12 @@ def on_message(client, userdata, msg):
                 "Humidity (%)": sensor_data.data["humidity"],
                 "Voltage (V)": sensor_data.data["voltage"],
                 "Current (mA)": sensor_data.data["current"],
-                "Power (mW)": sensor_data.data["power"],
-                "Vibration (m/s²)": sensor_data.data["vibration"]
+                "Power (mW)": sensor_data.data["power"]
             }
             
             sensor_data.history.append(history_row)
             print(f"✓ Message #{sensor_data.data['count']} - Timestamp: {ts}")
 
-            # Cap history
             if len(sensor_data.history) > MAX_ROWS:
                 sensor_data.history = sensor_data.history[-MAX_ROWS:]
 
@@ -266,7 +256,7 @@ with c4:
 st.markdown("---")
 
 # Current readings
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 with col1:
     st.subheader("📊 Sensor Readings")
     st.metric("Noise", f"{current.get('noise_db', 0.0):.2f} dB")
@@ -281,9 +271,6 @@ with col3:
     st.metric("Voltage", f"{current.get('voltage', 0.0):.2f} V")
     st.metric("Current", f"{current.get('current', 0.0):.2f} mA")
     st.metric("Power", f"{current.get('power', 0.0):.2f} mW")
-with col4:
-    st.subheader("📳 Vibration")
-    st.metric("Vibration", f"{current.get('vibration', 0.0):.2f} m/s²")
 
 st.markdown("---")
 
@@ -295,25 +282,22 @@ if history_len > 5:
 
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
-        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)","Vibration (m/s²)"
+        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
     ]
-    if len(df_graph) > 0:
-        # Only use columns that exist in the dataframe
-        existing_cols = [col for col in sensor_cols if col in df_graph.columns]
-        if existing_cols:
-            df_graph = df_graph.dropna(how="all", subset=existing_cols)
+    existing_cols = [col for col in sensor_cols if col in df_graph.columns]
+    if existing_cols:
+        df_graph = df_graph.dropna(how="all", subset=existing_cols)
 
     if "Timestamp" in df_graph.columns and len(df_graph) > 0:
         df_graph = df_graph.sort_values("Timestamp").reset_index(drop=True)
 
     if len(df_graph) > 0:
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "🌡️ Expansion Valve",
             "🌡️ Condenser Inlet",
             "🌡️ Ambient Temp",
             "💧 Humidity",
             "⚡ Power",
-            "📳 Vibration",
             "📈 Message Count"
         ])
 
@@ -343,11 +327,6 @@ if history_len > 5:
                             use_container_width=True)
 
         with tab6:
-            st.plotly_chart(create_graph(df_graph, 'Vibration (m/s²)',
-                                         'Vibration Magnitude', 'Vibration (m/s²)', '#FF1744'),
-                            use_container_width=True)
-
-        with tab7:
             st.plotly_chart(create_graph(df_graph, 'Count',
                                          'Data Reception Count', 'Message Count', '#FFB347'),
                             use_container_width=True)
@@ -366,9 +345,8 @@ if history_len > 0:
 
     sensor_cols = [
         "Noise (dB)","Expansion Valve Outlet Temp (°C)","Condenser Inlet Temp (°C)",
-        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)","Vibration (m/s²)"
+        "Ambient Temp (°C)","Humidity (%)","Voltage (V)","Current (mA)","Power (mW)"
     ]
-    # Only use columns that exist in the dataframe
     existing_cols = [col for col in sensor_cols if col in df_history.columns]
     if existing_cols:
         df_history = df_history.dropna(how="all", subset=existing_cols)
@@ -383,20 +361,7 @@ if history_len > 0:
     st.dataframe(
         df_display,
         use_container_width=True,
-        height=600,
-        column_config={
-            "Count": st.column_config.NumberColumn("Count", format="%d"),
-            "Timestamp": st.column_config.TextColumn("Time"),
-            "Noise (dB)": st.column_config.NumberColumn("Noise (dB)", format="%.2f"),
-            "Expansion Valve Outlet Temp (°C)": st.column_config.NumberColumn("Exp. Valve (°C)", format="%.2f"),
-            "Condenser Inlet Temp (°C)": st.column_config.NumberColumn("Condenser (°C)", format="%.2f"),
-            "Ambient Temp (°C)": st.column_config.NumberColumn("Ambient (°C)", format="%.2f"),
-            "Humidity (%)": st.column_config.NumberColumn("Humidity (%)", format="%.2f"),
-            "Voltage (V)": st.column_config.NumberColumn("Voltage (V)", format="%.2f"),
-            "Current (mA)": st.column_config.NumberColumn("Current (mA)", format="%.2f"),
-            "Power (mW)": st.column_config.NumberColumn("Power (mW)", format="%.2f"),
-            "Vibration (m/s²)": st.column_config.NumberColumn("Vibration (m/s²)", format="%.2f"),
-        }
+        height=600
     )
     st.caption(f"📊 Showing all {len(df_display)} records | Format: YYYY-MM-DD HH:MM:SS")
 else:
