@@ -50,7 +50,7 @@ def check_credentials():
         return False
     elif not st.session_state["authenticated"]:
         st.markdown("### 🔐 AC Compressor Dashboard - Login")
-        st.markdown("---")
+        st.markmarkdown("---")
         _, col, _ = st.columns([1, 2, 1])
         with col:
             st.error("❌ Invalid username or password. Please try again.")
@@ -142,17 +142,20 @@ def on_message(client, userdata, msg):
             sensor_data.data["last_update"] = ts
             sensor_data.data["count"] += 1
 
+            # ---- History row with status columns in 10th & 11th positions ----
             history_row = {
-                "Count": sensor_data.data["count"],
-                "Timestamp": ts,
-                "Noise (dB)": sensor_data.data["noise_db"],
-                "Expansion Valve Outlet Temp (°C)": sensor_data.data["expansion_valve_outlet_temp"],
-                "Condenser Inlet Temp (°C)": sensor_data.data["condenser_inlet_temp"],
-                "Ambient Temp (°C)": sensor_data.data["ambient_temp"],
-                "Humidity (%)": sensor_data.data["humidity"],
-                "Voltage (V)": sensor_data.data["voltage"],
-                "Current (mA)": sensor_data.data["current"],
-                "Power (mW)": sensor_data.data["power"]
+                "Count": sensor_data.data["count"],                         # 1
+                "Timestamp": ts,                                            # 2
+                "Noise (dB)": sensor_data.data["noise_db"],                # 3
+                "Expansion Valve Outlet Temp (°C)": sensor_data.data["expansion_valve_outlet_temp"],  # 4
+                "Condenser Inlet Temp (°C)": sensor_data.data["condenser_inlet_temp"],               # 5
+                "Ambient Temp (°C)": sensor_data.data["ambient_temp"],     # 6
+                "Humidity (%)": sensor_data.data["humidity"],              # 7
+                "Voltage (V)": sensor_data.data["voltage"],                # 8
+                "Current (mA)": sensor_data.data["current"],               # 9
+                "Refrigerant Line Status": "OK",                           # 10
+                "Motor Status": "Stable",                                  # 11
+                "Power (mW)": sensor_data.data["power"]                    # 12
             }
             
             sensor_data.history.append(history_row)
@@ -364,7 +367,21 @@ if history_len > 0:
     if "Count" in df_history.columns:
         df_history = df_history.sort_values("Count", ascending=True).reset_index(drop=True)
 
-    ordered_cols = ["Count", "Timestamp"] + sensor_cols
+    # Explicit column order to keep status at 10 & 11
+    ordered_cols = [
+        "Count",
+        "Timestamp",
+        "Noise (dB)",
+        "Expansion Valve Outlet Temp (°C)",
+        "Condenser Inlet Temp (°C)",
+        "Ambient Temp (°C)",
+        "Humidity (%)",
+        "Voltage (V)",
+        "Current (mA)",
+        "Refrigerant Line Status",
+        "Motor Status",
+        "Power (mW)"
+    ]
     available_cols = [c for c in ordered_cols if c in df_history.columns]
     df_display = df_history[available_cols]
 
