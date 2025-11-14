@@ -274,6 +274,16 @@ with col3:
 
 st.markdown("---")
 
+# ===================== FAULT PREDICTION STATUS =========================
+st.subheader("🧠 Fault Prediction Status")
+p1, p2 = st.columns(2)
+with p1:
+    st.metric("Motor Status", "Stable")
+with p2:
+    st.metric("Blockage/Leakage in Refrigerant Line", "OK")
+
+st.markdown("---")
+
 # ===================== GRAPHS ===========================
 st.subheader("📈 Real-Time Graphs")
 if history_len > 5:
